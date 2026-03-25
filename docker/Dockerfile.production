@@ -1,0 +1,240 @@
+# syntax=docker/dockerfile:1
+
+########################################
+# Build stage – composer, npm, assets  #
+########################################
+FROM dunglas/frankenphp:php8.4-alpine AS builder
+
+############################
+# System dependencies
+############################
+RUN apk add --no-cache \
+    git \
+    curl \
+    nodejs \
+    npm \
+    unzip \
+    mariadb-client \
+    icu-data-full
+
+############################
+# PHP extensions
+############################
+RUN install-php-extensions \
+    intl \
+    mbstring \
+    mysqli \
+    curl \
+    pdo_mysql \
+    zip \
+    bcmath \
+    sockets \
+    exif \
+    amqp \
+    gd \
+    imap \
+    opcache
+
+############################
+# PHP configuration
+############################
+# Use production defaults
+RUN cp $PHP_INI_DIR/php.ini-production $PHP_INI_DIR/php.ini
+
+# Memory limit
+RUN echo "memory_limit = 2048M" > $PHP_INI_DIR/conf.d/99-memory.ini
+
+# Timezone
+RUN echo "date.timezone = UTC" > $PHP_INI_DIR/conf.d/99-timezone.ini
+
+############################
+# Install Composer
+############################
+COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
+
+############################
+# Install Mautic
+############################
+ARG MAUTIC_VERSION="7.0.0"
+
+WORKDIR /opt
+
+RUN COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_PROCESS_TIMEOUT=10000 \
+    composer create-project mautic/recommended-project:${MAUTIC_VERSION} mautic --no-interaction \
+ && rm -rf /opt/mautic/var/cache/js \
+ && find /opt/mautic/node_modules -mindepth 1 -maxdepth 1 \
+    -not \( -name 'jquery' -or -name 'vimeo-froogaloop2' \) | xargs rm -rf
+
+############################
+# Build assets
+############################
+WORKDIR /opt/mautic
+
+RUN npm install \
+ && php bin/console mautic:assets:generate \
+ && php bin/console cache:clear
+
+#################################################
+# Fix missing file as of 7.0.2                  #
+# https://github.com/mautic/mautic/issues/15794 #
+#################################################
+RUN cp docroot/app/bundles/AssetBundle/Resources/views/Modules/preview.html.twig \
+       docroot/app/bundles/AssetBundle/Resources/views/Asset/
+
+########################################
+# Runtime stage – clean & minimal      #
+########################################
+FROM dunglas/frankenphp:php8.4-alpine
+
+ARG MAUTIC_VERSION
+ARG buildno
+ARG gitcommithash
+
+ARG APPLICATION_USER=application
+
+LABEL application="Mautic"
+LABEL version="${MAUTIC_VERSION}"
+LABEL maintainer="github.com/Mapiiik"
+
+RUN echo "Build number: $buildno"
+RUN echo "Based on commit: $gitcommithash"
+
+RUN adduser -D ${APPLICATION_USER}
+
+############################
+# System dependencies
+############################
+RUN apk add --no-cache \
+    curl \
+    mariadb-client \
+    icu-data-full
+
+############################
+# PHP extensions
+############################
+RUN install-php-extensions \
+    intl \
+    mbstring \
+    mysqli \
+    curl \
+    pdo_mysql \
+    zip \
+    bcmath \
+    sockets \
+    exif \
+    amqp \
+    gd \
+    imap \
+    opcache
+
+############################
+# PHP configuration
+############################
+# Use production defaults
+RUN cp $PHP_INI_DIR/php.ini-production $PHP_INI_DIR/php.ini
+
+# Memory limit
+RUN echo "memory_limit = 2048M" > $PHP_INI_DIR/conf.d/99-memory.ini
+
+# Upload limits
+RUN echo "upload_max_filesize = 512M" > $PHP_INI_DIR/conf.d/99-upload.ini \
+ && echo "post_max_size = 512M" >> $PHP_INI_DIR/conf.d/99-upload.ini
+
+# Execution time
+RUN echo "max_execution_time = 300" > $PHP_INI_DIR/conf.d/99-timeouts.ini
+
+# Timezone
+RUN echo "date.timezone = UTC" > $PHP_INI_DIR/conf.d/99-timezone.ini
+
+############################
+# Copy built Mautic
+############################
+COPY --chown="${APPLICATION_USER}":"${APPLICATION_USER}" --from=builder /opt/mautic /opt/mautic
+
+############################
+# Runtime setup
+############################
+ENV DOCKER_MAUTIC_ROLE=mautic_web \
+    DOCKER_MAUTIC_RUN_MIGRATIONS=false \
+    DOCKER_MAUTIC_ENABLE_EMAIL_FETCH=false
+
+VOLUME /opt/mautic/config
+VOLUME /opt/mautic/var/logs
+VOLUME /opt/mautic/docroot/media/files
+VOLUME /opt/mautic/docroot/media/images
+
+WORKDIR /opt/mautic/docroot
+ENV SERVER_ROOT=/opt/mautic/docroot
+
+###########################
+# Add on-start commands
+###########################
+RUN cat <<'EOF' > /usr/local/bin/docker-entrypoint-custom
+#!/bin/sh
+set -e
+
+case "$DOCKER_MAUTIC_ROLE" in
+  mautic_web)
+    # Migrations
+    if [ "$DOCKER_MAUTIC_RUN_MIGRATIONS" = "true" ]; then
+      php /opt/mautic/bin/console doctrine:migration:migrate --no-interaction
+    fi
+
+    exec docker-php-entrypoint "$@"
+    ;;
+  mautic_cron)
+    while true; do
+      minute=$(date +%M)
+      hour=$(date +%H)
+
+      case "$minute" in
+        00|15|30|45)
+          php /opt/mautic/bin/console mautic:segments:update || true
+          ;;
+        05|20|35|50)
+          php /opt/mautic/bin/console mautic:campaigns:update || true
+          ;;
+        10|25|40|55)
+          php /opt/mautic/bin/console mautic:campaigns:trigger || true
+          ;;
+        03|18|33|48)
+          php /opt/mautic/bin/console mautic:import || true
+          ;;
+      esac
+
+      # GeoIP update – once per day at 02:00
+      if [ "$hour" = "02" ] && [ "$minute" = "00" ]; then
+        php /opt/mautic/bin/console mautic:iplookup:download || true
+      fi
+
+      # Email fetch – every minute (opt-in)
+      if [ "$DOCKER_MAUTIC_ENABLE_EMAIL_FETCH" = "true" ]; then
+        php /opt/mautic/bin/console mautic:email:fetch || true
+      fi
+
+      sleep 60
+    done
+    ;;
+  mautic_worker)
+    exec php /opt/mautic/bin/console messenger:consume email hit failed --time-limit=3600
+    ;;
+  *)
+    echo "Invalid DOCKER_MAUTIC_ROLE: $DOCKER_MAUTIC_ROLE"
+    exit 1
+    ;;
+esac
+EOF
+
+RUN chmod +x /usr/local/bin/docker-entrypoint-custom
+
+ENTRYPOINT ["docker-entrypoint-custom"]
+CMD ["--config", "/etc/frankenphp/Caddyfile", "--adapter", "caddyfile"]
+
+############################
+# Non-root runtime
+############################
+RUN \
+    setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/frankenphp; \
+    chown -R ${APPLICATION_USER}:${APPLICATION_USER} /config/caddy /data/caddy /opt/mautic
+
+USER ${APPLICATION_USER}

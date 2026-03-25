@@ -1,0 +1,92 @@
+x-mautic-volumes:
+  &mautic-volumes
+  - ./data/mautic/config:/opt/mautic/config:z
+  - ./data/mautic/logs:/opt/mautic/var/logs:z
+  - ./data/mautic/media/files:/opt/mautic/docroot/media/files:z
+  - ./data/mautic/media/images:/opt/mautic/docroot/media/images:z
+
+services:
+  mautic-web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.production
+      args:
+        - buildno
+        - gitcommithash
+    image: mautic-frankenphp:local
+    restart: unless-stopped
+    environment:
+      DOCKER_MAUTIC_ROLE: mautic_web
+      DOCKER_MAUTIC_RUN_MIGRATIONS: ${DOCKER_MAUTIC_RUN_MIGRATIONS}
+      #SERVER_NAME: your.domain.example
+
+      # Advanced configuration (alternative to config/local.php)
+      # Uses official Mautic support for MAUTIC_CONFIG_PARAMETERS
+      # Uncomment if you want to configure Mautic purely via ENV
+      MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS:-}
+    volumes:
+      - ./data/mautic/config:/opt/mautic/config:z
+      - ./data/mautic/logs:/opt/mautic/var/logs:z
+      - ./data/mautic/media/files:/opt/mautic/docroot/media/files:z
+      - ./data/mautic/media/images:/opt/mautic/docroot/media/images:z
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/s/login"]
+      start_period: 5s
+      interval: 5s
+      timeout: 5s
+      retries: 100
+    depends_on:
+      database:
+        condition: service_healthy
+
+  mautic-cron:
+    image: mautic-frankenphp:local
+    restart: unless-stopped
+    environment:
+      DOCKER_MAUTIC_ROLE: mautic_cron
+      DOCKER_MAUTIC_ENABLE_EMAIL_FETCH: ${DOCKER_MAUTIC_ENABLE_EMAIL_FETCH}
+      MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS:-}
+    volumes:
+      *mautic-volumes
+    depends_on:
+      mautic-web:
+        condition: service_healthy
+
+  mautic-worker:
+    image: mautic-frankenphp:local
+    restart: unless-stopped
+    environment:
+      DOCKER_MAUTIC_ROLE: mautic_worker
+      MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS:-}
+    volumes:
+      *mautic-volumes
+    depends_on:
+      mautic-web:
+        condition: service_healthy
+
+  database:
+    image: mysql:lts
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - mautic-database:/var/lib/mysql:Z
+
+volumes:
+  caddy_data:
+  caddy_config:
+  mautic-database:
