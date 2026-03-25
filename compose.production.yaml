@@ -12,7 +12,7 @@ services:
     environment:
       DOCKER_MAUTIC_ROLE: mautic_web
       DOCKER_MAUTIC_RUN_MIGRATIONS: ${DOCKER_MAUTIC_RUN_MIGRATIONS}
-      #SERVER_NAME: your.domain.example
+      SERVER_NAME: ${SERVER_NAME:-}
 
       # Advanced configuration (alternative to config/local.php)
       # Uses official Mautic support for MAUTIC_CONFIG_PARAMETERS
