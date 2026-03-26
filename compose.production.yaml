@@ -17,7 +17,7 @@ services:
       # Advanced configuration (alternative to config/local.php)
       # Uses official Mautic support for MAUTIC_CONFIG_PARAMETERS
       # Uncomment if you want to configure Mautic purely via ENV
-      MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS}
+      MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS:-}
     volumes:
       - ./data/mautic/config:/opt/mautic/config:z
       - ./data/mautic/logs:/opt/mautic/var/logs:z
@@ -45,7 +45,7 @@ services:
     environment:
       DOCKER_MAUTIC_ROLE: mautic_cron
       DOCKER_MAUTIC_ENABLE_EMAIL_FETCH: ${DOCKER_MAUTIC_ENABLE_EMAIL_FETCH}
-      MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS}
+      MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS:-}
     volumes:
       *mautic-volumes
     depends_on:
@@ -57,7 +57,7 @@ services:
     restart: unless-stopped
     environment:
       DOCKER_MAUTIC_ROLE: mautic_worker
-      MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS}
+      MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS:-}
     volumes:
       *mautic-volumes
     depends_on:
