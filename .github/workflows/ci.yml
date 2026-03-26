@@ -91,7 +91,7 @@ jobs:
         if: steps.image_check.outputs.skip_build != 'true'
         uses: docker/build-push-action@v7
         with:
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           context: .
           file: docker/Dockerfile.production
           push: ${{ github.event_name != 'pull_request' }}
