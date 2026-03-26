@@ -76,6 +76,8 @@ jobs:
             type=sha
             type=raw,value=latest
             type=raw,value=${{ steps.mautic_release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.mautic_release.outputs.version }}
+            type=semver,pattern={{major}},value=${{ steps.mautic_release.outputs.version }}
 
       - name: Set up QEMU
         if: steps.image_check.outputs.skip_build != 'true'

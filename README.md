@@ -35,8 +35,10 @@ ghcr.io/mapiiik/mautic-frankenphp
 ```
 
 Available tags:
-- `latest` – latest recommended version
-- `<mautic-version>` – specific Mautic release
+- `latest` – latest recommended Mautic version (uses the latest supported PHP)
+- `<mautic-version>` – specific Mautic release (e.g. `7.0.1`)
+- `<major>.<minor>` – latest patch release within a minor series (e.g. `7.0`)
+- `<major>` – latest stable release within a major series (e.g. `7`)
 - `sha-<commit>` – infrastructure build reference
 
 ---
