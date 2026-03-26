@@ -7,9 +7,6 @@ on:
   push:
     branches:
       - main
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 jobs:
   docker:
     name: Build & Push Docker image
@@ -21,16 +18,17 @@ jobs:
     steps:
       - name: Get latest Mautic release
         id: mautic_release
-        run: |
-          VERSION=$(curl -fsSL --max-time 10 https://api.github.com/repos/mautic/mautic/releases/latest \
-            | grep '"tag_name"' \
-            | head -n 1 \
-            | sed -E 's/.*"v?([^"]+)".*/\1/')
-          if [ -z "$VERSION" ]; then
-            echo "::error::Failed to determine latest Mautic version"
-            exit 1
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const release = await github.rest.repos.getLatestRelease({
+              owner: 'mautic',
+              repo: 'mautic'
+            });
+            if (!release?.data?.tag_name) {
+              core.setFailed('Failed to fetch latest Mautic release');
+            }
+            core.setOutput('version', release.data.tag_name.replace(/^v/, ''));
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -40,39 +38,51 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check if image already exists (for scheduler)
+        id: image_check
         run: |
-          # Always build on push or PR
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "::notice::Triggered by ${{ github.event_name }} – forcing rebuild."
-          else
-            IMAGE="ghcr.io/${{ github.repository }}:${{ steps.mautic_release.outputs.version }}"
-            if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            REPO="${{ github.repository }}"
+            REPO="${REPO,,}" # Convert to lowercase
+            IMAGE="ghcr.io/$REPO:${{ steps.mautic_release.outputs.version }}"
+
+            echo "::notice::Checking if image exists: $IMAGE"
+
+            if docker manifest inspect "$IMAGE"; then
               echo "::notice::Image already exists, skipping scheduled build."
-              exit 0
+              echo "skip_build=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::Image not found or registry error – proceeding with build."
             fi
+          else
+            echo "::notice::Triggered by ${{ github.event_name }} – forcing rebuild."
           fi
+      - name: Announce build
+        if: steps.image_check.outputs.skip_build != 'true'
+        run: |
+          echo "::notice::Building image for Mautic ${{ steps.mautic_release.outputs.version }}"
 
       - name: Checkout
+        if: steps.image_check.outputs.skip_build != 'true'
         uses: actions/checkout@v6
 
       - name: Extract metadata
+        if: steps.image_check.outputs.skip_build != 'true'
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
+          # Docker metadata-action normalizes image name to lowercase
           tags: |
             type=sha
             type=raw,value=latest
             type=raw,value=${{ steps.mautic_release.outputs.version }}
 
-      - name: Announce build
-        run: |
-          echo "::notice::Building image for Mautic ${{ steps.mautic_release.outputs.version }}"
-
       - name: Set up Docker Buildx
+        if: steps.image_check.outputs.skip_build != 'true'
         uses: docker/setup-buildx-action@v4
 
       - name: Build and push
+        if: steps.image_check.outputs.skip_build != 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
