@@ -77,9 +77,11 @@ RUN npm install \
 #################################################
 # Fix missing file as of 7.0.2                  #
 # https://github.com/mautic/mautic/issues/15794 #
+# Should be fixed in 7.1.x                      #
+# https://github.com/mautic/mautic/pull/16034   #
 #################################################
-RUN cp docroot/app/bundles/AssetBundle/Resources/views/Modules/preview.html.twig \
-       docroot/app/bundles/AssetBundle/Resources/views/Asset/
+#RUN cp docroot/app/bundles/AssetBundle/Resources/views/Modules/preview.html.twig \
+#       docroot/app/bundles/AssetBundle/Resources/views/Asset/
 
 ########################################
 # Runtime stage – clean & minimal      #
