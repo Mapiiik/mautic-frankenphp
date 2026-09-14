@@ -8,13 +8,22 @@ on:
   push:
     branches:
       - main
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
-  docker:
-    name: Build & Push Docker image
+  ##########################################################################
+  # Resolve what to build, once, and share it with the build jobs
+  ##########################################################################
+  setup:
+    name: Resolve Mautic release
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    outputs:
+      version: ${{ steps.mautic_release.outputs.version }}
+      image: ${{ steps.image.outputs.name }}
+      skip_build: ${{ steps.image_check.outputs.skip_build }}
 
     steps:
       - name: Get latest Mautic release
@@ -31,6 +40,15 @@ jobs:
             }
             core.setOutput('version', release.data.tag_name.replace(/^v/, ''));
 
+      # docker/metadata-action lowercases the image name on its own, but the
+      # digest push and the manifest merge below address the registry directly,
+      # so the lowercase name has to be built here explicitly.
+      - name: Normalize image name
+        id: image
+        run: |
+          REPO="${{ github.repository }}"
+          echo "name=ghcr.io/${REPO,,}" >> "$GITHUB_OUTPUT"
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
@@ -42,9 +60,7 @@ jobs:
         id: image_check
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            REPO="${{ github.repository }}"
-            REPO="${REPO,,}" # Convert to lowercase
-            IMAGE="ghcr.io/$REPO:${{ steps.mautic_release.outputs.version }}"
+            IMAGE="${{ steps.image.outputs.name }}:${{ steps.mautic_release.outputs.version }}"
 
             echo "::notice::Checking if image exists: $IMAGE"
 
@@ -57,50 +73,138 @@ jobs:
           else
             echo "::notice::Triggered by ${{ github.event_name }} – forcing rebuild."
           fi
+
+  ##########################################################################
+  # One job per architecture, each on a native runner (no QEMU emulation).
+  # Nothing is tagged here - each job pushes an untagged image and reports
+  # back only its digest.
+  ##########################################################################
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: setup
+    if: needs.setup.outputs.skip_build != 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
       - name: Announce build
-        if: steps.image_check.outputs.skip_build != 'true'
         run: |
-          echo "::notice::Building image for Mautic ${{ steps.mautic_release.outputs.version }}"
+          echo "::notice::Building ${{ matrix.platform }} image for Mautic ${{ needs.setup.outputs.version }}"
 
       - name: Checkout
-        if: steps.image_check.outputs.skip_build != 'true'
         uses: actions/checkout@v6
 
       - name: Extract metadata
-        if: steps.image_check.outputs.skip_build != 'true'
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
-          # Docker metadata-action normalizes image name to lowercase
+          images: ${{ needs.setup.outputs.image }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Pull requests cannot push, so they build into the cache only and
+      # produce no digest for the merge job.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          platforms: ${{ matrix.platform }}
+          context: .
+          file: docker/Dockerfile.production
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          tags: ${{ needs.setup.outputs.image }}
+          outputs: ${{ github.event_name != 'pull_request' && 'type=image,push-by-digest=true,name-canonical=true,push=true' || 'type=cacheonly' }}
+          build-args: |
+            MAUTIC_VERSION=${{ needs.setup.outputs.version }}
+            buildno=${{ github.run_number }}
+            gitcommithash=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+
+      - name: Export digest
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  ##########################################################################
+  # Join the per-architecture digests into one multi-arch manifest and
+  # attach the real tags to it.
+  ##########################################################################
+  merge:
+    name: Push multi-arch manifest
+    needs:
+      - setup
+      - build
+    if: needs.setup.outputs.skip_build != 'true' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ needs.setup.outputs.image }}
           tags: |
             type=sha
             type=raw,value=latest
-            type=raw,value=${{ steps.mautic_release.outputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ steps.mautic_release.outputs.version }}
-            type=semver,pattern={{major}},value=${{ steps.mautic_release.outputs.version }}
+            type=raw,value=${{ needs.setup.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.setup.outputs.version }}
+            type=semver,pattern={{major}},value=${{ needs.setup.outputs.version }}
 
-      - name: Set up QEMU
-        if: steps.image_check.outputs.skip_build != 'true'
-        uses: docker/setup-qemu-action@v4
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ needs.setup.outputs.image }}@sha256:%s ' *)
 
-      - name: Set up Docker Buildx
-        if: steps.image_check.outputs.skip_build != 'true'
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build and push
-        if: steps.image_check.outputs.skip_build != 'true'
-        uses: docker/build-push-action@v7
-        with:
-          platforms: linux/amd64,linux/arm64
-          context: .
-          file: docker/Dockerfile.production
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            MAUTIC_VERSION=${{ steps.mautic_release.outputs.version }}
-            buildno=${{ github.run_number }}
-            gitcommithash=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect \
+            "${{ needs.setup.outputs.image }}:${{ steps.meta.outputs.version }}"
