@@ -55,33 +55,32 @@ COPY --from=composer:latest /usr/bin/composer /usr/local/bin/composer
 ############################
 # Install Mautic
 ############################
-ARG MAUTIC_VERSION="7.0.0"
+ARG MAUTIC_VERSION="7.2.0"
 
 WORKDIR /opt
 
 RUN COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_PROCESS_TIMEOUT=10000 \
     composer create-project mautic/recommended-project:${MAUTIC_VERSION} mautic --no-interaction \
- && rm -rf /opt/mautic/var/cache/js \
- && find /opt/mautic/node_modules -mindepth 1 -maxdepth 1 \
-    -not \( -name 'jquery' -or -name 'vimeo-froogaloop2' \) | xargs rm -rf
+ && rm -rf /opt/mautic/var/cache/js
 
 ############################
 # Build assets
 ############################
+# As of 7.2 `mautic:assets:generate` also runs sass:build, importmap:install
+# and asset-map:compile (Symfony AssetMapper + symfonycasts/sass-bundle).
+# `npx patch-package` must run after npm, otherwise the at.js / chosen-js
+# patches are missing from the generated media/js/libraries.js.
+# node_modules is pruned only after the assets are built - jquery and
+# vimeo-froogaloop2 are copied out by the command itself and must stay.
 WORKDIR /opt/mautic
 
-RUN npm install \
+RUN npm ci --prefer-offline --no-audit \
+ && npx patch-package \
  && php bin/console mautic:assets:generate \
- && php bin/console cache:clear
-
-#################################################
-# Fix missing file as of 7.0.2                  #
-# https://github.com/mautic/mautic/issues/15794 #
-# Should be fixed in 7.1.x                      #
-# https://github.com/mautic/mautic/pull/16034   #
-#################################################
-#RUN cp docroot/app/bundles/AssetBundle/Resources/views/Modules/preview.html.twig \
-#       docroot/app/bundles/AssetBundle/Resources/views/Asset/
+ && php bin/console cache:clear \
+ && rm -rf /opt/mautic/var/dart-sass \
+ && find /opt/mautic/node_modules -mindepth 1 -maxdepth 1 \
+    -not \( -name 'jquery' -or -name 'vimeo-froogaloop2' \) | xargs rm -rf
 
 ########################################
 # Runtime stage – clean & minimal      #
