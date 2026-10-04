@@ -1,9 +1,9 @@
 x-mautic-volumes:
   &mautic-volumes
-  - ./data/mautic/config:/opt/mautic/config:z
-  - ./data/mautic/logs:/opt/mautic/var/logs:z
-  - ./data/mautic/media/files:/opt/mautic/docroot/media/files:z
-  - ./data/mautic/media/images:/opt/mautic/docroot/media/images:z
+  - ${DATA_DIR:-./data}/mautic/config:/opt/mautic/config:z
+  - ${DATA_DIR:-./data}/mautic/logs:/opt/mautic/var/logs:z
+  - ${DATA_DIR:-./data}/mautic/media/files:/opt/mautic/docroot/media/files:z
+  - ${DATA_DIR:-./data}/mautic/media/images:/opt/mautic/docroot/media/images:z
 
 services:
   mautic-web:
@@ -25,10 +25,10 @@ services:
       # Uncomment if you want to configure Mautic purely via ENV
       MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS:-}
     volumes:
-      - ./data/mautic/config:/opt/mautic/config:z
-      - ./data/mautic/logs:/opt/mautic/var/logs:z
-      - ./data/mautic/media/files:/opt/mautic/docroot/media/files:z
-      - ./data/mautic/media/images:/opt/mautic/docroot/media/images:z
+      - ${DATA_DIR:-./data}/mautic/config:/opt/mautic/config:z
+      - ${DATA_DIR:-./data}/mautic/logs:/opt/mautic/var/logs:z
+      - ${DATA_DIR:-./data}/mautic/media/files:/opt/mautic/docroot/media/files:z
+      - ${DATA_DIR:-./data}/mautic/media/images:/opt/mautic/docroot/media/images:z
       - caddy_data:/data
       - caddy_config:/config
     ports:

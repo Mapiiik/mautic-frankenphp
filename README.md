@@ -67,6 +67,7 @@ docker compose up -d
 ## ⚙️ Configuration
 ### Environment variables
 - `SERVER_NAME` (automatic ACME certificates; otherwise self-signed HTTPS)
+- `DATA_DIR` (configuration, logs and media; default `./data`)
 - `DOCKER_MAUTIC_RUN_MIGRATIONS`
 - `DOCKER_MAUTIC_ENABLE_EMAIL_FETCH`
 - `MAUTIC_CONFIG_PARAMETERS` (optional, JSON)
