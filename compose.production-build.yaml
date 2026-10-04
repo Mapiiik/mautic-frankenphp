@@ -38,7 +38,8 @@ services:
       - "443:443"
       - "443:443/udp"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost/s/login"]
+      # Over HTTPS under its own name: behind a proxy Caddy does not listen on port 80
+      test: ["CMD-SHELL", "curl -fsSk -o /dev/null --resolve \"$$SERVER_NAME:443:127.0.0.1\" \"https://$$SERVER_NAME/s/login\""]
       start_period: 5s
       interval: 5s
       timeout: 5s
