@@ -57,6 +57,9 @@ services:
       MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS:-}
     volumes:
       *mautic-volumes
+    # No Caddy runs here, the healthcheck inherited from FrankenPHP would always fail
+    healthcheck:
+      disable: true
     depends_on:
       mautic-web:
         condition: service_healthy
@@ -69,6 +72,9 @@ services:
       MAUTIC_CONFIG_PARAMETERS: ${MAUTIC_CONFIG_PARAMETERS:-}
     volumes:
       *mautic-volumes
+    # No Caddy runs here, the healthcheck inherited from FrankenPHP would always fail
+    healthcheck:
+      disable: true
     depends_on:
       mautic-web:
         condition: service_healthy
