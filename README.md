@@ -67,6 +67,10 @@ docker compose up -d
 ## ⚙️ Configuration
 ### Environment variables
 - `SERVER_NAME` (automatic ACME certificates; otherwise self-signed HTTPS)
+- `LISTENER_MODE` (`direct` by default; `behind-proxy` behind an SNI proxy such as HAProxy, which owns
+  port 80, so certificates come by the TLS-ALPN challenge)
+- `PROXY_ALLOW` (where the PROXY protocol header is trusted from: the proxy's network; by default
+  only this machine. The header is optional, so it works with or without a proxy)
 - `DATA_DIR` (configuration, logs and media; default `./data`)
 - `DOCKER_MAUTIC_RUN_MIGRATIONS`
 - `DOCKER_MAUTIC_ENABLE_EMAIL_FETCH`

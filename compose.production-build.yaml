@@ -19,6 +19,8 @@ services:
       DOCKER_MAUTIC_ROLE: mautic_web
       DOCKER_MAUTIC_RUN_MIGRATIONS: ${DOCKER_MAUTIC_RUN_MIGRATIONS}
       SERVER_NAME: ${SERVER_NAME:-localhost}
+      LISTENER_MODE: ${LISTENER_MODE:-direct}
+      PROXY_ALLOW: ${PROXY_ALLOW:-127.0.0.1/32 ::1/128}
 
       # Advanced configuration (alternative to config/local.php)
       # Uses official Mautic support for MAUTIC_CONFIG_PARAMETERS
