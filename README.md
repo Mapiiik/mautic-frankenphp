@@ -7,7 +7,7 @@ This repository provides:
 - a multi-stage Docker build for Mautic
 - role-based containers (web / cron / worker)
 - production Docker Compose setup
-- automated CI that rebuilds images on new Mautic releases
+- automated CI that rebuilds images on new Mautic releases and new base images
 
 ---
 
@@ -21,7 +21,7 @@ This repository provides:
   - `mautic_cron`
   - `mautic_worker`
 - **Release-driven CI**
-  - scheduled builds only when a new Mautic version is released
+  - scheduled builds only when a new Mautic version or a new base image (PHP and Alpine fixes) is out
   - forced rebuilds on infrastructure changes
 - Images published to **GitHub Container Registry**
 
@@ -40,6 +40,7 @@ Available tags:
 - `<major>.<minor>` – latest patch release within a minor series (e.g. `7.0`)
 - `<major>` – latest stable release within a major series (e.g. `7`)
 - `sha-<commit>` – infrastructure build reference
+- `build-<mautic-version>-<base-digest>` – the build key the scheduled runs compare against
 
 ---
 
@@ -80,7 +81,8 @@ The image supports official Mautic configuration via environment variables
 as an alternative to `config/local.php`.
 
 ## 🧠 CI Behavior
-- Scheduled runs check for new Mautic releases and build images only when needed.
+- Scheduled runs build only when the Mautic release or the base image digest changed. `BASE_IMAGE`
+  in the workflow has to match the `FROM` lines in `docker/Dockerfile.production`.
 - Pushes to main always trigger a rebuild.
 - No repository changes are made by CI.
 

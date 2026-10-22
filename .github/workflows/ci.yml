@@ -13,15 +13,19 @@ permissions:
   contents: read
   packages: write
 
+env:
+  BASE_IMAGE: dunglas/frankenphp:php8.4-alpine
+
 jobs:
   ##########################################################################
   # Resolve what to build, once, and share it with the build jobs
   ##########################################################################
   setup:
-    name: Resolve Mautic release
+    name: Resolve Mautic release and base image
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.mautic_release.outputs.version }}
+      key: ${{ steps.key.outputs.key }}
       image: ${{ steps.image.outputs.name }}
       skip_build: ${{ steps.image_check.outputs.skip_build }}
 
@@ -39,6 +43,14 @@ jobs:
               core.setFailed('Failed to fetch latest Mautic release');
             }
             core.setOutput('version', release.data.tag_name.replace(/^v/, ''));
+
+      # A new base image (PHP or Alpine fixes) is a reason to rebuild too
+      - name: Build key from Mautic release and base image digest
+        id: key
+        run: |
+          BASE_DIGEST="$(docker buildx imagetools inspect --raw "$BASE_IMAGE" | sha256sum | cut -c1-12)"
+          echo "::notice::Base image $BASE_IMAGE digest $BASE_DIGEST"
+          echo "key=build-${{ steps.mautic_release.outputs.version }}-${BASE_DIGEST}" >> "$GITHUB_OUTPUT"
 
       # docker/metadata-action lowercases the image name on its own, but the
       # digest push and the manifest merge below address the registry directly,
@@ -60,7 +72,7 @@ jobs:
         id: image_check
         run: |
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            IMAGE="${{ steps.image.outputs.name }}:${{ steps.mautic_release.outputs.version }}"
+            IMAGE="${{ steps.image.outputs.name }}:${{ steps.key.outputs.key }}"
 
             echo "::notice::Checking if image exists: $IMAGE"
 
@@ -196,6 +208,7 @@ jobs:
             type=raw,value=${{ needs.setup.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ needs.setup.outputs.version }}
             type=semver,pattern={{major}},value=${{ needs.setup.outputs.version }}
+            type=raw,value=${{ needs.setup.outputs.key }}
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
@@ -207,4 +220,4 @@ jobs:
       - name: Inspect image
         run: |
           docker buildx imagetools inspect \
-            "${{ needs.setup.outputs.image }}:${{ steps.meta.outputs.version }}"
+            "${{ needs.setup.outputs.image }}:${{ needs.setup.outputs.key }}"
